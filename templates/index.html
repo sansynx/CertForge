@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CertForge | NPTEL Certificate Intelligence</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Playfair+Display:ital,wght@1,700&display=optional"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="landing-page">
+    <header class="site-nav landing-nav">
+      <a class="brand" href="/">CertForge<span></span></a>
+      <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+        <span></span>
+        <span></span>
+      </button>
+      <nav aria-label="Primary navigation">
+        <a href="#how-it-works">How This Works</a>
+        <a href="/toolkit">Toolkit</a>
+        <a href="http://sanathr.me/" target="_blank" rel="noreferrer">Portfolio</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-backdrop" aria-hidden="true">
+          <video class="hero-video" autoplay muted loop playsinline>
+            <source src="{{ url_for('static', filename='Cinematic_Sky.mp4') }}" type="video/mp4" />
+          </video>
+        </div>
+        <div class="hero-content">
+          <p class="hero-kicker">NPTEL certificate intelligence</p>
+          <h1 class="hero-title">
+            <em>CertForge</em>
+          </h1>
+          <p class="hero-copy hero-copy-anim">
+            Verify NPTEL PDFs with QR-backed confidence.
+          </p>
+          <a class="hero-button hero-btn-anim" href="/toolkit">Open Toolkit</a>
+        </div>
+      </section>
+
+      <section id="how-it-works" class="section">
+        <div class="section-heading">
+          <p class="eyebrow">How this works</p>
+          <h2>From uploaded certificate to official NPTEL evidence.</h2>
+        </div>
+        <div class="steps-grid">
+          <article>
+            <span>01</span>
+            <h3>Decode</h3>
+            <p>Read the QR code from each uploaded PDF.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>Resolve</h3>
+            <p>Open the official NPTEL certificate link.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>Compare</h3>
+            <p>Match name, course code, and marks.</p>
+          </article>
+          <article id="csv-export">
+            <span>04</span>
+            <h3>Export</h3>
+            <p>Download a CSV with confidence levels.</p>
+          </article>
+        </div>
+      </section>
+
+      <footer class="product-footer">
+        <div>
+          <p class="eyebrow">Built for growing colleges</p>
+          <h2>More students should not mean more manual checking.</h2>
+        </div>
+        <p>
+          Big batches, less checking. Upload PDFs, verify QR records, export the report.
+        </p>
+        <a href="/toolkit">Try the toolkit</a>
+      </footer>
+    </main>
+    <script src="{{ url_for('static', filename='nav.js') }}"></script>
+  </body>
+</html>
