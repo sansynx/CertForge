@@ -782,7 +782,8 @@ td {
   overflow: hidden;
 }
 
-.meter span {
+.meter span,
+.meter-fill {
   display: block;
   height: 100%;
   background: var(--accent);

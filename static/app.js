@@ -117,6 +117,11 @@ function renderResults(results) {
   }
 
   resultsBody.innerHTML = results.map(renderRow).join("");
+
+  // Set meter widths via DOM (CSP-safe — property assignment, not inline attribute)
+  resultsBody.querySelectorAll(".meter-fill[data-pct]").forEach((el) => {
+    el.style.width = `${el.dataset.pct}%`;
+  });
 }
 
 function renderRow(result) {
@@ -144,7 +149,7 @@ function renderRow(result) {
       <td class="confidence">
         <span class="status ${escapeAttribute(result.status)}">${escapeHtml(result.status.replaceAll("_", " "))}</span>
         <strong class="subtle">${Number(result.confidence) || 0}% confidence</strong>
-        <div class="meter"><span style="width: ${Number(result.confidence) || 0}%"></span></div>
+        <div class="meter"><span class="meter-fill" data-pct="${Number(result.confidence) || 0}"></span></div>
         ${mismatches ? `<span class="subtle">Mismatch: ${escapeHtml(mismatches)}</span>` : ""}
       </td>
       <td>${qr}<span class="subtle">${result.same_file ? "Exact PDF match" : "Field comparison"}</span></td>

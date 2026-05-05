@@ -147,20 +147,12 @@ def default_fetch_text(url: str) -> tuple[str, str]:
     _validate_nptel_url(url)
     response = requests.get(
         url,
-        timeout=10,
-        allow_redirects=False,
+        timeout=15,
+        allow_redirects=True,
         headers={"User-Agent": "Mozilla/5.0"},
     )
-    # follow at most one redirect, re-validating the target
-    if response.is_redirect:
-        location = response.headers.get("Location", "")
-        _validate_nptel_url(location)
-        response = requests.get(
-            location,
-            timeout=10,
-            allow_redirects=False,
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
+    # Validate the final resolved URL after all redirects
+    _validate_nptel_url(response.url)
     response.raise_for_status()
     return response.text, response.url
 
@@ -169,19 +161,12 @@ def default_fetch_bytes(url: str) -> bytes:
     _validate_nptel_url(url)
     response = requests.get(
         url,
-        timeout=15,
-        allow_redirects=False,
+        timeout=20,
+        allow_redirects=True,
         headers={"User-Agent": "Mozilla/5.0"},
     )
-    if response.is_redirect:
-        location = response.headers.get("Location", "")
-        _validate_nptel_url(location)
-        response = requests.get(
-            location,
-            timeout=15,
-            allow_redirects=False,
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
+    # Validate the final resolved URL after all redirects
+    _validate_nptel_url(response.url)
     response.raise_for_status()
     return response.content
 
