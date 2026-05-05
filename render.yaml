@@ -3,7 +3,7 @@ services:
     name: certforge
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: waitress-serve --host=0.0.0.0 --port=$PORT app:app
+    startCommand: gunicorn -c gunicorn.conf.py app:app
     envVars:
       - key: FLASK_DEBUG
         value: "0"
