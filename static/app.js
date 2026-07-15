@@ -8,6 +8,8 @@ const fileCount = document.querySelector("#fileCount");
 const verifiedCount = document.querySelector("#verifiedCount");
 const reviewCount = document.querySelector("#reviewCount");
 const avgConfidence = document.querySelector("#avgConfidence");
+const dropZone = input.closest(".drop-zone");
+const resultStatuses = new Set(["verified", "partial_match", "needs_review", "fetch_failed", "mismatch", "qr_not_found"]);
 
 const processingLines = [
   "Parsing uploaded PDFs...",
@@ -22,14 +24,39 @@ let currentResults = [];
 let processTimer = null;
 let processIndex = 0;
 
-input.addEventListener("change", () => {
+input.addEventListener("change", handleFilesChanged);
+
+["dragenter", "dragover"].forEach((eventName) => {
+  dropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    dropZone.classList.add("is-dragging");
+  });
+});
+
+["dragleave", "drop"].forEach((eventName) => {
+  dropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("is-dragging");
+  });
+});
+
+dropZone.addEventListener("drop", (event) => {
+  const droppedFiles = event.dataTransfer?.files;
+  if (!droppedFiles?.length) return;
+  input.files = droppedFiles;
+  handleFilesChanged();
+});
+
+function handleFilesChanged() {
   const count = input.files.length;
+  currentResults = [];
+  renderResults(currentResults);
   statusText.textContent = count
-    ? `${count} PDF${count === 1 ? "" : "s"} loaded into CertForge.`
+    ? `${count} PDF${count === 1 ? "" : "s"} loaded. Ready to verify.`
     : "Waiting for PDF uploads.";
   exportButton.hidden = true;
   exportButton.disabled = true;
-});
+}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -65,18 +92,31 @@ form.addEventListener("submit", async (event) => {
 });
 
 exportButton.addEventListener("click", async () => {
-  const response = await fetch("/api/export", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ results: currentResults }),
-  });
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "certforge-nptel-report.csv";
-  link.click();
-  URL.revokeObjectURL(url);
+  setBusy(true);
+  statusText.textContent = "Preparing your CSV report...";
+  try {
+    const response = await fetch("/api/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ results: currentResults }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "Could not export the CSV report.");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "certforge-nptel-report.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+    statusText.textContent = "CSV report downloaded.";
+  } catch (error) {
+    statusText.textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
 });
 
 function setBusy(isBusy) {
@@ -107,7 +147,7 @@ function renderResults(results) {
   verifiedCount.textContent = verified;
   reviewCount.textContent = review;
   const average = results.length
-    ? Math.round(results.reduce((sum, result) => sum + result.confidence, 0) / results.length)
+    ? Math.round(results.reduce((sum, result) => sum + confidenceValue(result.confidence), 0) / results.length)
     : 0;
   avgConfidence.textContent = `${average}%`;
 
@@ -131,6 +171,8 @@ function renderRow(result) {
     .filter(([, matched]) => matched === false)
     .map(([field]) => field.replaceAll("_", " "))
     .join(", ");
+  const confidence = confidenceValue(result.confidence);
+  const status = safeStatus(result.status);
   const qr = result.qr_url && isSafeUrl(result.qr_url)
     ? `<a class="evidence-link" href="${escapeAttribute(result.qr_url)}" target="_blank" rel="noreferrer noopener">QR link</a>`
     : `<span class="subtle">No QR</span>`;
@@ -147,14 +189,23 @@ function renderRow(result) {
       <td>${pair(uploaded.exam_score, online.exam_score)}</td>
       <td>${pair(uploaded.total_score, online.total_score)}</td>
       <td class="confidence">
-        <span class="status ${escapeAttribute(result.status)}">${escapeHtml(result.status.replaceAll("_", " "))}</span>
-        <strong class="subtle">${Number(result.confidence) || 0}% confidence</strong>
-        <div class="meter"><span class="meter-fill" data-pct="${Number(result.confidence) || 0}"></span></div>
+        <span class="status ${status}">${escapeHtml(status.replaceAll("_", " "))}</span>
+        <strong class="subtle">${confidence}% confidence</strong>
+        <div class="meter"><span class="meter-fill" data-pct="${confidence}"></span></div>
         ${mismatches ? `<span class="subtle">Mismatch: ${escapeHtml(mismatches)}</span>` : ""}
       </td>
       <td>${qr}<span class="subtle">${result.same_file ? "Exact PDF match" : "Field comparison"}</span></td>
     </tr>
   `;
+}
+
+function confidenceValue(value) {
+  const confidence = Number(value);
+  return Number.isFinite(confidence) ? Math.max(0, Math.min(100, Math.round(confidence))) : 0;
+}
+
+function safeStatus(value) {
+  return resultStatuses.has(value) ? value : "needs_review";
 }
 
 function pair(uploadedValue, onlineValue) {
@@ -169,7 +220,7 @@ function pair(uploadedValue, onlineValue) {
 function isSafeUrl(value) {
   try {
     const url = new URL(value);
-    return (url.protocol === "https:" || url.protocol === "http:") &&
+    return url.protocol === "https:" &&
       (url.hostname === "nptel.ac.in" || url.hostname.endsWith(".nptel.ac.in"));
   } catch {
     return false;

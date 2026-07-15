@@ -4,7 +4,7 @@ import csv
 import hashlib
 import io
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -59,6 +59,9 @@ FIELD_WEIGHTS = {
 OFFICIAL_CERTIFICATE_ORIGIN = "https://archive.nptel.ac.in"
 ALLOWED_QR_HOSTS = {"nptel.ac.in", "archive.nptel.ac.in"}
 MAX_PDF_PAGES = 10  # reject absurdly large PDFs
+MAX_RENDER_PIXELS = 15_000_000
+MAX_REMOTE_HTML_BYTES = 2 * 1024 * 1024
+MAX_REMOTE_PDF_BYTES = 50 * 1024 * 1024
 
 
 def _validate_nptel_url(url: str) -> str:
@@ -67,9 +70,11 @@ def _validate_nptel_url(url: str) -> str:
         parsed = urlparse(url)
     except Exception:
         raise ValueError(f"Malformed URL: {url!r}")
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"Disallowed URL scheme: {parsed.scheme!r}")
-    host = parsed.netloc.lower().split(":")[0]
+    if parsed.scheme != "https":
+        raise ValueError("Only HTTPS NPTEL URLs are allowed.")
+    if parsed.username or parsed.password:
+        raise ValueError("URLs containing credentials are not allowed.")
+    host = (parsed.hostname or "").lower()
     if not any(host == allowed or host.endswith("." + allowed) for allowed in ALLOWED_QR_HOSTS):
         raise ValueError(f"URL host {host!r} is not an allowed NPTEL domain.")
     return url
@@ -80,36 +85,38 @@ def sha256_bytes(content: bytes) -> str:
 
 
 def extract_qr_url(pdf_bytes: bytes) -> str:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    if doc.page_count > MAX_PDF_PAGES:
-        raise ValueError(f"PDF has {doc.page_count} pages; maximum allowed is {MAX_PDF_PAGES}.")
-    detector = cv2.QRCodeDetector()
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        if doc.page_count > MAX_PDF_PAGES:
+            raise ValueError(f"PDF has {doc.page_count} pages; maximum allowed is {MAX_PDF_PAGES}.")
+        detector = cv2.QRCodeDetector()
 
-    for page_index in range(doc.page_count):
-        page = doc.load_page(page_index)
-        for zoom in (1, 2, 3, 4, 5):
-            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
-            image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
-                pix.height, pix.width, pix.n
-            )
-            data, _, _ = detector.detectAndDecode(image)
-            if data:
-                return data.strip()
+        for page_index in range(doc.page_count):
+            page = doc.load_page(page_index)
+            for zoom in (1, 2, 3, 4, 5):
+                if page.rect.width * zoom * page.rect.height * zoom > MAX_RENDER_PIXELS:
+                    continue
+                pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+                    pix.height, pix.width, pix.n
+                )
+                data, _, _ = detector.detectAndDecode(image)
+                if data:
+                    return data.strip()
 
-            ok, decoded, _, _ = detector.detectAndDecodeMulti(image)
-            if ok:
-                for item in decoded:
-                    if item:
-                        return item.strip()
+                ok, decoded, _, _ = detector.detectAndDecodeMulti(image)
+                if ok:
+                    for item in decoded:
+                        if item:
+                            return item.strip()
 
     return ""
 
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    if doc.page_count > MAX_PDF_PAGES:
-        raise ValueError(f"PDF has {doc.page_count} pages; maximum allowed is {MAX_PDF_PAGES}.")
-    return "\n".join(page.get_text() for page in doc)
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        if doc.page_count > MAX_PDF_PAGES:
+            raise ValueError(f"PDF has {doc.page_count} pages; maximum allowed is {MAX_PDF_PAGES}.")
+        return "\n".join(page.get_text() for page in doc)
 
 
 def extract_certificate_pdf_url(html: str, base_url: str) -> str:
@@ -143,18 +150,43 @@ def paired_value(uploaded_value: str, online_value: str) -> str:
     return f"uploaded: {uploaded_label} | online: {online_label}"
 
 
+def _read_limited_response(response: requests.Response, max_bytes: int) -> bytes:
+    content_length = response.headers.get("Content-Length")
+    if content_length:
+        try:
+            declared_length = int(content_length)
+        except (TypeError, ValueError):
+            declared_length = None
+        if declared_length is not None and declared_length > max_bytes:
+            raise ValueError("Remote file exceeds the allowed size.")
+
+    content = bytearray()
+    for chunk in response.iter_content(chunk_size=64 * 1024):
+        if not chunk:
+            continue
+        content.extend(chunk)
+        if len(content) > max_bytes:
+            raise ValueError("Remote file exceeds the allowed size.")
+    return bytes(content)
+
+
 def default_fetch_text(url: str) -> tuple[str, str]:
     _validate_nptel_url(url)
     response = requests.get(
         url,
         timeout=15,
         allow_redirects=True,
+        stream=True,
         headers={"User-Agent": "Mozilla/5.0"},
     )
-    # Validate the final resolved URL after all redirects
-    _validate_nptel_url(response.url)
-    response.raise_for_status()
-    return response.text, response.url
+    try:
+        # Validate the final resolved URL after all redirects.
+        _validate_nptel_url(response.url)
+        response.raise_for_status()
+        content = _read_limited_response(response, MAX_REMOTE_HTML_BYTES)
+        return content.decode(response.encoding or "utf-8", errors="replace"), response.url
+    finally:
+        response.close()
 
 
 def default_fetch_bytes(url: str) -> bytes:
@@ -163,12 +195,16 @@ def default_fetch_bytes(url: str) -> bytes:
         url,
         timeout=20,
         allow_redirects=True,
+        stream=True,
         headers={"User-Agent": "Mozilla/5.0"},
     )
-    # Validate the final resolved URL after all redirects
-    _validate_nptel_url(response.url)
-    response.raise_for_status()
-    return response.content
+    try:
+        # Validate the final resolved URL after all redirects.
+        _validate_nptel_url(response.url)
+        response.raise_for_status()
+        return _read_limited_response(response, MAX_REMOTE_PDF_BYTES)
+    finally:
+        response.close()
 
 
 def normalize(value: str) -> str:
@@ -290,8 +326,11 @@ def verify_certificate(
 ) -> VerificationResult:
     messages: list[str] = []
     local_sha = sha256_bytes(pdf_bytes)
-    uploaded_fields = extract_fields_from_text(extract_text_from_pdf(pdf_bytes))
-    qr_url = extract_qr_url(pdf_bytes)
+    try:
+        uploaded_fields = extract_fields_from_text(extract_text_from_pdf(pdf_bytes))
+        qr_url = extract_qr_url(pdf_bytes)
+    except Exception as exc:
+        raise ValueError("Uploaded file could not be processed as a PDF.") from exc
 
     if not qr_url:
         return VerificationResult(
@@ -309,6 +348,8 @@ def verify_certificate(
         if not certificate_url:
             raise ValueError("The NPTEL page did not expose a certificate PDF link.")
         online_pdf = fetch_bytes(certificate_url)
+        if not online_pdf.startswith(b"%PDF"):
+            raise ValueError("The official NPTEL link did not return a PDF file.")
         online_sha = sha256_bytes(online_pdf)
         online_fields = extract_fields_from_text(extract_text_from_pdf(online_pdf))
         same_file = local_sha == online_sha
@@ -338,11 +379,6 @@ def verify_certificate(
             messages=messages,
             local_sha256=local_sha,
         )
-
-
-def result_to_dict(result: VerificationResult) -> dict:
-    data = asdict(result)
-    return data
 
 
 def _sanitize_csv_field(value: str) -> str:

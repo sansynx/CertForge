@@ -98,6 +98,12 @@ certforge/
 
 ---
 
+## Safety Limits
+
+CertForge only follows HTTPS links on `nptel.ac.in` and `archive.nptel.ac.in`, including after redirects. Uploaded batches are limited to 100 PDFs and 50 MB in total. To keep PDF rendering and archive downloads bounded, each PDF is limited to 10 pages, QR rendering is capped by pixel count, verification pages are limited to 2 MB, and downloaded archive PDFs are limited to 50 MB.
+
+---
+
 ## API Endpoints
 
 | Method | Path | Description |
@@ -107,6 +113,8 @@ certforge/
 | `POST` | `/api/verify` | Accepts PDF uploads, returns JSON results |
 | `POST` | `/api/export` | Accepts JSON results, returns CSV download |
 | `GET` | `/health` | Health check |
+
+`/api/export` accepts at most 100 result records, matching the upload batch limit.
 
 ---
 

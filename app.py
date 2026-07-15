@@ -89,9 +89,15 @@ def verify_uploads():
             return jsonify({"error": f"{uploaded_file.filename!r} is not a valid PDF."}), 400
         try:
             results.append(verify_certificate(uploaded_file.filename, content))
+        except ValueError:
+            logger.info("Rejected unreadable PDF upload: %s", uploaded_file.filename)
+            return jsonify({"error": "One or more uploaded files could not be processed as PDFs."}), 400
         except Exception:
             logger.exception("Verification failed for %s", uploaded_file.filename)
             return jsonify({"error": "Verification failed. Please try again."}), 500
+
+    if not results:
+        return jsonify({"error": "Upload at least one non-empty certificate PDF."}), 400
 
     logger.info("Verified %d certificate(s)", len(results))
     return jsonify({"results": [asdict(r) for r in results]})
@@ -103,6 +109,8 @@ def export_csv_from_payload():
     raw_results = payload.get("results")
     if not raw_results or not isinstance(raw_results, list):
         return jsonify({"error": "No results provided."}), 400
+    if len(raw_results) > MAX_FILES:
+        return jsonify({"error": f"Maximum {MAX_FILES} results per export."}), 400
 
     try:
         results = [_result_from_dict(item) for item in raw_results]
